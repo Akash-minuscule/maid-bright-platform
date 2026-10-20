@@ -61,6 +61,14 @@ function loadConfig() {
   if (tokenEncryptionKey && tokenEncryptionKey.length !== 32)
     throw new ConfigError('TOKEN_ENCRYPTION_KEY must be 32 random bytes in base64 (see backend/.env.example).');
 
+  // Salesforce external Customer Users (optional). Without both values, provisioning is recorded as NOT_CONFIGURED.
+  const customerProfileId = process.env.SF_CUSTOMER_PROFILE_ID?.trim() || undefined;
+  if (customerProfileId && !/^00e[A-Za-z0-9]{12}([A-Za-z0-9]{3})?$/.test(customerProfileId))
+    throw new ConfigError('SF_CUSTOMER_PROFILE_ID must be a Salesforce Profile ID (00e...).');
+  const customerUsernameSuffix = process.env.SF_CUSTOMER_USERNAME_SUFFIX?.trim().toLowerCase() || undefined;
+  if (customerUsernameSuffix && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(customerUsernameSuffix))
+    throw new ConfigError('SF_CUSTOMER_USERNAME_SUFFIX must look like a domain, e.g. maidbright.demo');
+
   const otpEmailProvider = process.env.OTP_EMAIL_PROVIDER?.trim() || 'console';
   if (otpEmailProvider !== 'console' && otpEmailProvider !== 'salesforce')
     throw new ConfigError('OTP_EMAIL_PROVIDER must be "console" or "salesforce".');
@@ -89,6 +97,15 @@ function loadConfig() {
     tokenEncryptionKey,
     /** 'console' (localhost only: codes are printed in the backend terminal) or 'salesforce' (emailSimple action). */
     otpEmailProvider: otpEmailProvider as 'console' | 'salesforce',
+    /** Settings for Salesforce external Customer Users linked to customer Contacts. */
+    customerUser: {
+      profileId: customerProfileId,
+      usernameSuffix: customerUsernameSuffix,
+      timeZone: process.env.SF_CUSTOMER_TIMEZONE?.trim() || 'America/Chicago',
+      locale: process.env.SF_CUSTOMER_LOCALE?.trim() || 'en_US',
+      language: process.env.SF_CUSTOMER_LANGUAGE?.trim() || 'en_US',
+      emailEncoding: 'UTF-8',
+    },
     dbPath: process.env.MB_DB_PATH?.trim() || resolve(import.meta.dirname, '../data/maidbright.db'),
   } as const;
 }

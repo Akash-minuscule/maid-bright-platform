@@ -55,6 +55,10 @@ const soqlSeen: string[] = [];
 const composites: Array<{ allOrNone: boolean; compositeRequest: Array<{ url: string; body: Record<string, string> }> }> = [];
 let nextComposite: 'ok' | 'duplicate' = 'ok';
 let created = 0;
+// External Customer Users in the fake org. Contacts listed in licenceFull get LICENSE_LIMIT_EXCEEDED.
+const fakeUsers: Array<{ Id: string; ContactId: string; IsActive: boolean; fields: Record<string, string> }> = [];
+const licenceFull = new Set<string>();
+const CUSTOMER_PROFILE = '00e000000000CUSAAA';
 
 function fakeSalesforce(): Server {
   return createServer((req, res) => {
@@ -78,6 +82,11 @@ function fakeSalesforce(): Server {
         const q = url.searchParams.get('q')!;
         soqlSeen.push(q);
         if (/FROM RecordType/.test(q)) return json(200, { records: [{ Id: PERSON_RT }] });
+        if (/FROM User WHERE ContactId/.test(q)) {
+          const contactId = q.match(/ContactId = '([^']+)'/)![1];
+          return json(200, { records: fakeUsers.filter((u) => u.ContactId === contactId).map(({ Id, IsActive }) => ({ Id, IsActive })) });
+        }
+        if (/FROM Profile/.test(q)) return json(200, { records: q.includes(CUSTOMER_PROFILE) ? [{ UserType: 'CspLitePortal' }] : [] });
         if (/FROM Contact/.test(q)) {
           const email = q.match(/Email = '([^']+)'/)![1]!.toLowerCase();
           return json(200, { records: contacts.filter((c) => c.Email.toLowerCase() === email) });
@@ -86,6 +95,13 @@ function fakeSalesforce(): Server {
           const account = q.match(/WHERE AccountId = '([^']+)'/)![1];
           return json(200, { records: appointments.filter((a) => a.AccountId === account) });
         }
+      }
+      if (url.pathname === '/services/data/v66.0/sobjects/User' && req.method === 'POST') {
+        const fields = JSON.parse(raw);
+        if (licenceFull.has(fields.ContactId)) return json(400, [{ errorCode: 'LICENSE_LIMIT_EXCEEDED', message: 'License Limit Exceeded' }]);
+        const id = `005CUST${String(fakeUsers.length + 1).padStart(8, '0')}AAA`;
+        fakeUsers.push({ Id: id, ContactId: fields.ContactId, IsActive: true, fields });
+        return json(201, { id, success: true, errors: [] });
       }
       if (url.pathname === '/services/data/v66.0/composite' && req.method === 'POST') {
         const body = JSON.parse(raw);
@@ -142,7 +158,8 @@ before(async () => {
   db.close();
   server = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
     env: { ...process.env, PORT: String(PORT), MB_DB_PATH: dbPath, FRONTEND_ORIGINS: APP_ORIGIN, ADMIN_SF_USER_IDS: INTEGRATION_USER,
-      TOKEN_ENCRYPTION_KEY: KEY.toString('base64'), OTP_EMAIL_PROVIDER: 'console' },
+      TOKEN_ENCRYPTION_KEY: KEY.toString('base64'), OTP_EMAIL_PROVIDER: 'console',
+      SF_CUSTOMER_PROFILE_ID: CUSTOMER_PROFILE, SF_CUSTOMER_USERNAME_SUFFIX: 'maidbright.test' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   server.stdout!.on('data', (chunk) => (output += chunk));
@@ -188,6 +205,21 @@ async function codeFor(email: string) {
 }
 
 const PASSWORD = 'Sparkling-Clean-42';
+
+/** Waits for background Salesforce User provisioning to record a final result for this email. */
+async function userLink(email: string) {
+  for (let i = 0; i < 100; i++) {
+    const db = openDatabase(dbPath);
+    const row = db
+      .prepare(`SELECT l.user_status AS status, l.sf_user_id AS sfUserId, l.user_error AS error, l.contact_id AS contactId
+               FROM customer_salesforce_links l JOIN customers c ON c.id = l.customer_id WHERE c.email = ?`)
+      .get(email) as { status: string; sfUserId: string | null; error: string | null; contactId: string } | undefined;
+    db.close();
+    if (row && row.status !== 'pending') return row;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`no provisioning result for ${email}`);
+}
 
 test('existing Salesforce customer: generic start, OTP, password, login, own appointments only', async () => {
   const known = await post('/activation/start', { email: 'Sarah@Example.com ' });
@@ -342,6 +374,35 @@ test('login errors are generic and do not reveal unactivated Salesforce customer
   assert.deepEqual(unactivated.body, unknown.body);
   assert.deepEqual(unknown.body, wrong.body);
   assert.match(wrong.body.message, /Existing customer\? Activate your account/);
+});
+
+test('Salesforce Customer Users are provisioned after sign-up and password setup, one per Contact', async () => {
+  const sarah = await userLink('sarah@example.com'); // activated in the first test
+  assert.equal(sarah.status, 'provisioned');
+  const taylor = await userLink('taylor@example.com'); // registered as a new customer
+  assert.equal(taylor.status, 'provisioned');
+  for (const link of [sarah, taylor]) {
+    const users = fakeUsers.filter((u) => u.ContactId === link.contactId);
+    assert.equal(users.length, 1, 'exactly one user per Contact');
+    assert.equal(users[0]!.Id, link.sfUserId);
+    assert.equal(users[0]!.fields.ProfileId, CUSTOMER_PROFILE);
+    assert.match(users[0]!.fields.Username!, /.maidbright.test$/);
+  }
+});
+
+test('a Salesforce User failure is recorded but never blocks the Maid Bright login', async () => {
+  const email = 'fullhouse@example.com';
+  const start = await post('/registration/start', { firstName: 'Full', lastName: 'House', email, phone: '2145550177' });
+  await post('/otp/verify', { verificationId: start.body.verificationId, code: await codeFor(email) });
+  // The next Contact the fake creates will hit the licence limit.
+  licenceFull.add(`003N0000000000${created + 1}AAA`.slice(0, 18));
+  const done = await post('/registration/complete', { verificationId: start.body.verificationId, password: PASSWORD, confirmPassword: PASSWORD });
+  assert.equal(done.status, 201, 'sign-up succeeds');
+  const link = await userLink(email);
+  assert.equal(link.status, 'blocked');
+  assert.match(link.error!, /^LICENSE_LIMIT_EXCEEDED/);
+  assert.equal(link.sfUserId, null);
+  assert.equal((await post('/login', { email, password: PASSWORD })).status, 200, 'login still works');
 });
 
 test('appointments need a session and logout ends it', async () => {

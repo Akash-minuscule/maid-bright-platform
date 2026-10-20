@@ -194,3 +194,28 @@ All errors use the format `{ "error": CODE, "message": text }`.
 - `ALREADY_ACTIVATED`, `ALREADY_REGISTERED`: a login already exists for this email.
 
 Run `npm test` to run all of these flows against a fake Salesforce API.
+
+## Salesforce external Customer Users
+
+After a customer verifies their email and is linked to a Contact (password setup or new registration), the backend provisions **one external Customer User** for that Contact. This happens **in the background**:
+
+- The sign-up response, Maid Bright login, sessions and appointment access never wait for it or depend on it.
+- Customers don't log in to Salesforce with it. Customer OAuth and Experience Cloud login aren't configured.
+
+**Settings** (`.env`):
+- `SF_CUSTOMER_PROFILE_ID` (an external profile, `00e…`) and `SF_CUSTOMER_USERNAME_SUFFIX` (e.g. `maidbright.demo`).
+- Optional: `SF_CUSTOMER_TIMEZONE`, `SF_CUSTOMER_LOCALE`, `SF_CUSTOMER_LANGUAGE`.
+
+**How provisioning works:**
+- **Reuse first.** An existing User for the Contact is linked, never duplicated. If that User is inactive, it's linked but not reactivated, because reactivating uses a licence.
+- **External profiles only.** The profile's `UserType` must be external (`CspLitePortal`, `CustomerSuccess`, `PowerCustomerSuccess`, `PowerPartner`). Anything else is refused, so an internal User is never created.
+- **Separate transaction.** The User insert is its own REST call, never combined with Account/Contact DML.
+- **Fields set:** `ContactId`, `ProfileId`, `Username`, `Email`, `FirstName`, `LastName`, `Alias`, `CommunityNickname`, `TimeZoneSidKey`, `LocaleSidKey`, `EmailEncodingKey`, `LanguageLocaleKey`. No password is sent.
+- **Username:** `<email>.<suffix>`. If that's taken, it falls back to `<contactId>@<suffix>`. Nicknames have a fallback too.
+- **Result stored** on `customer_salesforce_links`: `sf_user_id`, `user_status`, `user_error`, `user_attempts`, `user_next_attempt_at`.
+
+| Status | Meaning | Retry |
+|---|---|---|
+| `provisioned` | User created or reused | none |
+| `failed` | Temporary (timeout, connection lost, unexpected) | after 1, 5, 15, 60, then every 240 minutes. A retry first looks for a User created by a lost request |
+| `blocked` | Needs a Salesforce or `.env` fix: `NOT_CONFIGURED`, `PROFILE_NOT_FOUND`, `PROFILE_NOT_EXTERNAL`, `LICENSE_LIMIT_EXCEEDED`, `ACCOUNT_OWNER_ROLE_MISSING`, `DUPLICATE_USERNAME`, `USER_INACTIVE`, `CONFIGURATION_ERROR`, `LINK_CONFLICT` | every 6 hours, and for every customer at each backend restart |

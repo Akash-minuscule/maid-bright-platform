@@ -309,5 +309,25 @@ export async function listAppointments(accountId: string): Promise<CustomerAppoi
   });
 }
 
+// ---------- External Customer Users ----------
+
+/** Salesforce calls used by userProvisioning.ts, each its own REST request (no mixed DML with Account/Contact). */
+export const salesforceUserApi = {
+  async findUserByContact(contactId: string) {
+    const rows = await query<{ Id: string; IsActive: boolean }>(
+      `SELECT Id, IsActive FROM User WHERE ContactId = ${soqlId(contactId)} LIMIT 1`,
+    );
+    return rows[0];
+  },
+  async getProfileUserType(profileId: string) {
+    const rows = await query<{ UserType: string }>(`SELECT UserType FROM Profile WHERE Id = ${soqlId(profileId)} LIMIT 1`);
+    return rows[0]?.UserType;
+  },
+  async createUser(fields: Record<string, string>) {
+    const result = await integrationRequest<{ id: string }>('/sobjects/User', { method: 'POST', body: fields });
+    return result.id;
+  },
+};
+
 export const isSalesforceDown = (error: unknown) =>
   error instanceof SalesforceError && (error as { unreachable?: boolean }).unreachable === true;

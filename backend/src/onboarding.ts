@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 import { customers } from './appDb.js';
+import { scheduleUserProvisioning } from './customerUsers.js';
 import { publicCustomer, setSessionCookie, validEmail } from './customerAuth.js';
 import { CustomerStoreError, normalizeEmail } from './customerStore.js';
 import { requireIntegration } from './integration.js';
@@ -207,6 +208,8 @@ function finish(res: Response, v: Verification, customerId: string) {
   setSessionCookie(res, customers.createSession(customerId));
   const account = customers.findForLogin(v.email)!;
   res.status(201).json({ customer: publicCustomer(account.customer) });
+  // After the response: the customer is already signed in, whatever happens to Salesforce User provisioning.
+  scheduleUserProvisioning(customerId);
 }
 
 onboardingRouter.post('/activation/complete', async (req, res) => {

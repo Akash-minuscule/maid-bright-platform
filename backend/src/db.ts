@@ -75,6 +75,20 @@ const MIGRATIONS = [
   );
   CREATE INDEX email_verifications_email ON email_verifications(email, created_at);
   `,
+  `
+  -- Salesforce external Customer User for each linked Contact. Provisioning runs after sign-up and is retried;
+  -- it never blocks the Maid Bright login. Status: pending | provisioned | failed (temporary) | blocked (needs a
+  -- Salesforce configuration fix).
+  ALTER TABLE customer_salesforce_links ADD COLUMN sf_user_id TEXT;
+  ALTER TABLE customer_salesforce_links ADD COLUMN user_status TEXT NOT NULL DEFAULT 'pending';
+  ALTER TABLE customer_salesforce_links ADD COLUMN user_error TEXT;
+  ALTER TABLE customer_salesforce_links ADD COLUMN user_attempts INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE customer_salesforce_links ADD COLUMN user_next_attempt_at INTEGER;
+  ALTER TABLE customer_salesforce_links ADD COLUMN user_updated_at INTEGER;
+  -- One Salesforce User can never be linked to two Maid Bright customers.
+  CREATE UNIQUE INDEX customer_links_sf_user ON customer_salesforce_links(org_id, sf_user_id) WHERE sf_user_id IS NOT NULL;
+  CREATE INDEX customer_links_user_due ON customer_salesforce_links(user_status, user_next_attempt_at);
+  `,
 ];
 
 export function openDatabase(path: string): DatabaseSync {

@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { config } from './config.js';
 import { customerRouter } from './customerAuth.js';
+import { startUserProvisioningWorker } from './customerUsers.js';
 import { connectIntegration, integrationStatus, usesIntegrationToken } from './integration.js';
 import { onboardingRouter } from './onboarding.js';
 import { escapeHtml, page } from './html.js';
@@ -162,6 +163,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[server] unexpected error', (err as Error)?.message);
   res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Unexpected server error.' });
 });
+
+startUserProvisioningWorker();
 
 app.listen(config.port, () => {
   console.info(`Maid Bright backend listening on http://localhost:${config.port}`);
