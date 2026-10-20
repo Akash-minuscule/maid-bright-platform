@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Maid Bright POC",
+    "slug": "maid-bright-poc",
+    "version": "0.2.0",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.maidbright.poc"
+    },
+    "android": {
+      "package": "com.maidbright.poc",
+      "predictiveBackGestureEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ],
+    "scheme": "maidbright"
+  }
+}

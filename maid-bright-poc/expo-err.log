@@ -1,0 +1,1 @@
+react-native-web is not installed. Some React Native components may not work on web without it. Install it with: npx expo install react-native-web

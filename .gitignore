@@ -1,0 +1,9 @@
+# Salesforce CLI local org/auth data
+.sf/
+.sfdx/
+
+node_modules/
+.env
+.env.*
+!.env.example
+.DS_Store

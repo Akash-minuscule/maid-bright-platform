@@ -1,0 +1,10 @@
+node_modules/
+dist/
+
+# Local SQLite database (customer logins and sessions) - never commit
+data/
+
+# Salesforce credentials - never commit
+.env
+.env.*
+!.env.example
